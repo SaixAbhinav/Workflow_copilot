@@ -1,0 +1,45 @@
+# Secrets & credentials
+.env
+.env.local
+client_secret*.json
+token.pkl
+tokens/
+
+# Local data
+history.db
+config/user_prefs.json
+exports/*.txt
+exports/*.csv
+
+# Test artifacts
+tests/test_pdfs/
+.pytest_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / scratch
+*.log
+error.log
