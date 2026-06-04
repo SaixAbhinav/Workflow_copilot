@@ -120,53 +120,61 @@ workflow through the orchestrator; **Auto mode** fans recent emails out for
 parallel triage and ranking.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontFamily':'Segoe UI, Helvetica, Arial, sans-serif','fontSize':'14px','lineColor':'#9aa0a6','primaryBorderColor':'#cdd2d6'}}}%%
 flowchart TD
-    subgraph IN[" 📥 &nbsp;Inputs "]
-        direction LR
-        F["📄 &nbsp;File<br/><small>.txt · .pdf</small>"]
-        T["📝 &nbsp;Pasted text"]
-        G["📧 &nbsp;Gmail messages"]
-    end
+    F["File · .txt / .pdf"]
+    T["Pasted text"]
+    G["Gmail messages"]
+    IP["input_processing<br/>handlers · cleaner · chunker"]
+    GA["google_auth · email_handler<br/>OAuth2 · multi-account fetch"]
 
-    F & T --> IP["input_processing/<br/><small>handlers · cleaner · chunker</small>"]
-    G --> GA["google_auth · email_handler<br/><small>OAuth2 · multi-account fetch</small>"]
+    F --> IP
+    T --> IP
+    G --> GA
 
-    IP --> WE["core/workflow_engine.py<br/><b>Manual mode</b><br/><small>one workflow at a time</small>"]
+    WE["workflow_engine<br/><b>Manual mode</b> · one workflow"]
+    AS["auto_scan<br/><b>Auto mode</b> · parallel inbox triage"]
+    PM["prompt_manager<br/>per-workflow prompts"]
+
+    IP --> WE
     GA --> WE
-    GA --> AS["core/auto_scan.py<br/><b>Auto mode</b><br/><small>parallel inbox triage + ranking</small>"]
+    GA --> AS
+    WE --> PM
 
-    WE --> PM["core/prompt_manager.py<br/><small>per-workflow prompt templates</small>"]
-
-    subgraph LLM[" 🧠 &nbsp;Local LLM core "]
-        direction LR
-        LR["core/llm_router.py"] --> OS["services/ollama_service.py<br/><small>local Ollama model</small>"]
-    end
+    LR["llm_router"]
+    OS["ollama_service<br/>local Ollama model"]
+    OP["output_parser<br/>extract + merge JSON"]
 
     PM --> LR
-    AS -.->|own triage prompt| LR
-    OS --> OP["core/output_parser.py<br/><small>extract JSON · merge_results()</small>"]
+    AS -->|triage prompt| LR
+    LR --> OS
+    OS --> OP
 
-    OP --> UI["ui/main_window.py<br/><small>display · review · export · history</small>"]
-    AS ==>|ranked digest · tiers| UI
+    UI["main_window<br/>display · review · export · history"]
+    CAL["calendar_service<br/>Google Calendar"]
+    DB[("SQLite history")]
 
-    UI -->|approved tasks| CAL["services/calendar_service.py<br/>📅 &nbsp;Google Calendar events"]
-    UI --> DB[("storage/<br/><small>SQLite history</small>")]
+    OP --> UI
+    AS -->|ranked digest| UI
+    UI -->|approved tasks| CAL
+    UI --> DB
 
-    classDef inputs fill:#e8f0fe,stroke:#4285f4,stroke-width:1px,color:#202124;
-    classDef manual fill:#fff4e5,stroke:#f59e0b,stroke-width:1px,color:#202124;
-    classDef auto fill:#fde7f0,stroke:#d6336c,stroke-width:1px,color:#202124;
-    classDef llm fill:#ede9fe,stroke:#7c3aed,stroke-width:1px,color:#202124;
-    classDef sink fill:#e6f4ea,stroke:#34a853,stroke-width:1px,color:#202124;
+    classDef input fill:#e8f0fe,stroke:#4285f4,color:#202124;
+    classDef manual fill:#fef7e0,stroke:#f9ab00,color:#202124;
+    classDef auto fill:#fce8f0,stroke:#d6336c,color:#202124;
+    classDef llm fill:#f3e8fd,stroke:#9334e6,color:#202124;
+    classDef sink fill:#e6f4ea,stroke:#34a853,color:#202124;
 
-    class F,T,G,IP,GA inputs;
+    class F,T,G,IP,GA input;
     class WE,PM manual;
     class AS auto;
     class LR,OS,OP llm;
     class UI,CAL,DB sink;
 ```
 
-The **pink** node is Auto mode, the **amber** nodes are Manual mode, and both
-feed the shared **purple** local-LLM core before results land in the UI.
+**Blue** is input/ingestion, **amber** is Manual mode, **pink** is Auto mode,
+**purple** is the shared local-LLM core, and **green** is where results land
+(UI → Calendar / SQLite history).
 
 ---
 
