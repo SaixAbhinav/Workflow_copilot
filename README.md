@@ -12,8 +12,10 @@ model. Your documents and emails never leave your machine — the LLM runs local
 ![Ollama](https://img.shields.io/badge/LLM-Ollama%20(local)-000000)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-<!-- DEMO: record a ~30s clip of one full workflow, convert to GIF, save as docs/demo.gif -->
+<!-- DEMO: record a ~30s clip of one full workflow, convert to GIF, save as
+     docs/demo.gif, then uncomment the line below.
 ![Demo](docs/demo.gif)
+-->
 
 ---
 
