@@ -1,7 +1,6 @@
 import os
 import pickle
 import re
-import shutil
 
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -102,7 +101,7 @@ def get_active_account() -> str | None:
     if not os.path.exists(ACTIVE_FILE):
         accounts = list_accounts()
         return accounts[0] if accounts else None
-    with open(ACTIVE_FILE, "r", encoding="utf-8") as f:
+    with open(ACTIVE_FILE, encoding="utf-8") as f:
         email = f.read().strip()
     return email or None
 

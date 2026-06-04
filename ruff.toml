@@ -1,0 +1,23 @@
+# Ruff config for AI Workflow Copilot.
+# Run: python -m ruff check .        (lint)
+#      python -m ruff check --fix .  (lint + autofix)
+#      python -m ruff format .       (format)
+
+target-version = "py39"
+line-length = 100
+
+exclude = [
+    "venv",
+    ".venv",
+    "tokens",
+    "exports",
+    "tests/test_pdfs",
+]
+
+[lint]
+# A pragmatic starter set: pyflakes (F), pycodestyle errors (E) + warnings (W),
+# import sorting (I), pyupgrade (UP), bugbear (B). Expand as you learn the rules.
+select = ["E", "W", "F", "I", "UP", "B"]
+ignore = [
+    "E501",  # line-too-long: reported by formatter, not worth blocking edits on
+]

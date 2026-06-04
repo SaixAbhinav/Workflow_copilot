@@ -1,18 +1,39 @@
 def build_prompt(text: str, workflow: str) -> str:
 
     if workflow == "summary":
-        return f"""You are a summarization system.
+        return f"""You are a professional summarization assistant. Produce a clear, scannable summary a busy reader can use INSTEAD OF reading the original.
 
-Return ONLY JSON:
+Return ONLY JSON in this exact shape:
 {{
-  "summary": "...",
-  "key_insights": []
+  "summary": ["full sentence one.", "full sentence two.", "full sentence three.", "full sentence four."]
 }}
 
-Focus:
-- Short, clear summary
-- No tasks
-- No action items
+STRICT RULES for every element of the "summary" array:
+1. Each element MUST be a COMPLETE SENTENCE of at least 12 words.
+2. Each element MUST contain a verb and state a fact, claim, or event from the source.
+3. NEVER return single words, names, or noun phrases. "Anthropic" is WRONG. "Anthropic released Claude Opus 4.7 in early 2026" is RIGHT.
+4. Return between 4 and 7 elements total.
+5. Element 1 names the topic, source, and setting.
+6. Middle elements cover the main claims, decisions, findings, or events in source order, with concrete specifics (names, numbers, dates, outcomes) where present.
+7. The final element states the implication, conclusion, or "so what".
+8. Do NOT include tasks, action items, or advice to the reader.
+9. Do NOT prefix elements with dashes, bullets, or numbers — the array IS the structure.
+
+EXAMPLE OF GOOD OUTPUT (for an article about small language models):
+{{
+  "summary": [
+    "A TechCrunch piece reviews the 2026 shift among major AI labs toward smaller, locally runnable language models.",
+    "Anthropic, Google DeepMind, and Meta have each released sub-3-billion-parameter models tuned for on-device use this year.",
+    "The article argues the move is driven by privacy demands from enterprise customers and rising cloud inference costs.",
+    "Benchmarks cited show the new small models reach 80 to 90 percent of last year's flagship performance on common tasks.",
+    "The author concludes that the next 12 months will favour developers who ship local-first AI features over cloud-only ones."
+  ]
+}}
+
+EXAMPLE OF BAD OUTPUT (do NOT do this):
+{{
+  "summary": ["Small Language Models", "Anthropic", "Google DeepMind", "Meta"]
+}}
 
 Input:
 {text}

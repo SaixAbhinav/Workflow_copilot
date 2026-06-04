@@ -1,8 +1,13 @@
 import requests
+
 from config import settings
 
-def call_ollama(prompt: str, model: str = None) -> str:
+_DEFAULT_OPTIONS = {"temperature": 0.2, "top_p": 0.9}
+
+
+def call_ollama(prompt: str, model: str = None, options: dict | None = None) -> str:
     model = model or settings.OLLAMA_MODEL
+    merged_options = {**_DEFAULT_OPTIONS, **(options or {})}
     try:
         response = requests.post(
             settings.OLLAMA_URL,
@@ -10,10 +15,11 @@ def call_ollama(prompt: str, model: str = None) -> str:
                 "model": model,
                 "prompt": prompt,
                 "stream": False,
-                "options": {"temperature": 0.2, "top_p": 0.9},
+                "options": merged_options,
                 "format": "json",
+                "keep_alive": "30m",
             },
-            timeout=60,
+            timeout=300,
         )
         response.raise_for_status()
         return response.json()["response"]
@@ -23,7 +29,7 @@ def call_ollama(prompt: str, model: str = None) -> str:
             "Make sure Ollama is running (ollama serve)."
         )
     except requests.exceptions.Timeout:
-        raise RuntimeError("Ollama request timed out after 60 seconds.")
+        raise RuntimeError("Ollama request timed out after 300 seconds.")
     except requests.exceptions.HTTPError as e:
         raise RuntimeError(f"Ollama returned an error: {e}")
     except (KeyError, ValueError) as e:

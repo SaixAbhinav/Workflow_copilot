@@ -1,5 +1,6 @@
 import re
 
+
 def extract_deadline(text):
     patterns = [
         r"\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\b",

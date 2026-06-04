@@ -1,5 +1,6 @@
 import json
 
+
 def safe_loads(text: str) -> dict | None:
     try:
         return json.loads(text)

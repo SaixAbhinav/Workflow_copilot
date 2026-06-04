@@ -1,14 +1,22 @@
-from core.prompt_manager import build_prompt
+from typing import Callable, Optional
+
+from config import settings
 from core.llm_router import route_llm
 from core.output_parser import parse_output
+from core.prompt_manager import build_prompt
 from input_processing.chunker import chunk_text
-from config import settings
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+ProgressCallback = Callable[[int, int], None]
 
-def run_workflow(text: str, workflow: str = "summary") -> dict:
+
+def run_workflow(
+    text: str,
+    workflow: str = "summary",
+    progress_callback: Optional[ProgressCallback] = None,
+) -> dict:
     if not text or not text.strip():
         return {"error": "No input text provided"}
 
@@ -17,6 +25,10 @@ def run_workflow(text: str, workflow: str = "summary") -> dict:
         chunks = [text]
     else:
         chunks = chunk_text(text, max_words=settings.CHUNK_SIZE)
+
+    total = len(chunks)
+    if progress_callback:
+        progress_callback(0, total)
 
     all_results = []
     for i, chunk in enumerate(chunks):
@@ -30,6 +42,8 @@ def run_workflow(text: str, workflow: str = "summary") -> dict:
                 logger.warning(f"Chunk {i} failed to parse: {parsed.get('raw', '')[:100]}")
         except Exception as e:
             logger.error(f"Chunk {i} raised an exception: {e}")
+        if progress_callback:
+            progress_callback(i + 1, total)
 
     if not all_results:
         return {"error": "All chunks failed to process. Check the provider is reachable."}
@@ -45,7 +59,7 @@ def merge_results(results: list[dict], workflow: str) -> dict:
     elif workflow == "compare":
         final = {"summary": "", "common_themes": [], "differences": [], "key_insights": []}
     else:
-        final = {"summary": ""}
+        final = {"summary": []}
 
     for res in results:
         if workflow == "tasks":
@@ -60,15 +74,22 @@ def merge_results(results: list[dict], workflow: str) -> dict:
         elif workflow == "insights":
             final["key_insights"].extend(res.get("key_insights", []))
         elif workflow == "compare":
-            s = res.get("summary", "").strip()
-            if s:
+            s = res.get("summary", "")
+            # Compare uses prose; keep string concat.
+            if isinstance(s, str) and s.strip():
                 final["summary"] = (final["summary"] + " " + s).strip()
+            elif isinstance(s, list):
+                # Tolerate the model returning a list here too.
+                final["summary"] = (final["summary"] + " " + " ".join(p for p in s if isinstance(p, str))).strip()
             final["common_themes"].extend(res.get("common_themes", []))
             final["differences"].extend(res.get("differences", []))
             final["key_insights"].extend(res.get("key_insights", []))
         else:
-            s = res.get("summary", "").strip()
-            if s:
-                final["summary"] = (final["summary"] + " " + s).strip()
+            s = res.get("summary")
+            if isinstance(s, list):
+                final["summary"].extend(p.strip() for p in s if isinstance(p, str) and p.strip())
+            elif isinstance(s, str) and s.strip():
+                # Backwards-compat: if a chunk returns prose, keep it as one bullet.
+                final["summary"].append(s.strip())
 
     return final

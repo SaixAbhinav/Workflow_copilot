@@ -14,5 +14,5 @@ def get_provider() -> str:
     return _PROVIDER
 
 
-def route_llm(prompt: str) -> str:
-    return call_ollama(prompt)
+def route_llm(prompt: str, options: dict | None = None) -> str:
+    return call_ollama(prompt, options=options)

@@ -3,6 +3,13 @@
 .env.local
 client_secret*.json
 token.pkl
+secret.txt
+
+# Personal artifacts (not part of the app)
+*.docx
+
+# Personal Claude Code instructions (private)
+CLAUDE.local.md
 tokens/
 
 # Local data

@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, time
+from datetime import datetime, time, timedelta
+
 from dateutil import parser as dateparser
 from googleapiclient.errors import HttpError
 

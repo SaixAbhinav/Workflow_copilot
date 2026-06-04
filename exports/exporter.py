@@ -9,8 +9,15 @@ def export_txt(result: dict, workflow: str, directory: str = ".") -> str:
     filename = os.path.join(directory, f"result_{workflow}_{_timestamp()}.txt")
     lines = [f"Workflow: {workflow}", f"Exported: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ""]
 
-    if "summary" in result:
-        lines += ["=== SUMMARY ===", result["summary"].strip(), ""]
+    summary = result.get("summary")
+    if isinstance(summary, list):
+        points = [p.strip() for p in summary if isinstance(p, str) and p.strip()]
+        if points:
+            lines += ["=== SUMMARY ==="]
+            for p in points:
+                lines += [f"  • {p}", ""]
+    elif isinstance(summary, str) and summary.strip():
+        lines += ["=== SUMMARY ===", summary.strip(), ""]
     if result.get("key_insights"):
         lines += ["=== INSIGHTS ==="]
         lines += [f"  • {i}" for i in result["key_insights"]]
@@ -41,7 +48,13 @@ def export_csv(result: dict, workflow: str, directory: str = ".") -> str:
                 writer.writerow([insight])
         elif "summary" in result:
             writer.writerow(["Field", "Value"])
-            writer.writerow(["Summary", result["summary"].strip()])
+            summary = result.get("summary")
+            if isinstance(summary, list):
+                for i, point in enumerate(summary, 1):
+                    if isinstance(point, str) and point.strip():
+                        writer.writerow([f"Summary point {i}", point.strip()])
+            elif isinstance(summary, str) and summary.strip():
+                writer.writerow(["Summary", summary.strip()])
             for i, insight in enumerate(result.get("key_insights", []), 1):
                 writer.writerow([f"Insight {i}", insight])
 

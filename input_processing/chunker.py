@@ -1,5 +1,6 @@
 import re
 
+
 def chunk_text(text: str, max_words: int = 300) -> list[str]:
     # Split on sentence boundaries to avoid cutting mid-sentence
     sentences = re.split(r'(?<=[.!?])\s+', text.strip())

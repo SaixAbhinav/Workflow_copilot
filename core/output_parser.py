@@ -1,6 +1,7 @@
 import json
 import re
 
+
 def extract_json(text: str) -> str | None:
     # Strip markdown code fences
     text = re.sub(r"```(?:json)?\s*", "", text).strip()

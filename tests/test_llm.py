@@ -1,6 +1,8 @@
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from core.llm_router import route_llm, set_provider, get_provider
+
+from core.llm_router import get_provider, route_llm, set_provider
 
 
 def test_default_provider_is_ollama():
@@ -37,6 +39,7 @@ def test_ollama_service_returns_response(mock_post):
 @patch("services.ollama_service.requests.post")
 def test_ollama_service_raises_on_connection_error(mock_post):
     import requests
+
     from services.ollama_service import call_ollama
     mock_post.side_effect = requests.exceptions.ConnectionError()
     with pytest.raises(RuntimeError, match="Could not connect"):

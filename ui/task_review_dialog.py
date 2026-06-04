@@ -1,8 +1,16 @@
-from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QComboBox, QHeaderView, QLabel, QAbstractItemView,
-)
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+)
 
 
 class TaskReviewDialog(QDialog):

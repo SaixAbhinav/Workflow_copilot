@@ -1,5 +1,6 @@
 """Generate sample PDFs for exercising each workflow mode."""
 import os
+
 import fitz  # PyMuPDF
 
 OUT_DIR = os.path.join(os.path.dirname(__file__), "test_pdfs")
@@ -148,6 +149,125 @@ Estimated annual cost: ~$40k in infrastructure plus 0.25 FTE of engineering
 time.
 """,
 
+    # ── TASKS mode (narrative — should classify as narrative, no action items) ─
+    "test_tasks_narrative.pdf": """Acme Robotics unveils household assistant at annual showcase
+
+SAN FRANCISCO — Acme Robotics took the stage at its annual developer
+showcase on Wednesday morning to unveil Helio, a wheeled household
+assistant the company says can fold laundry, load a dishwasher, and
+recognise more than two thousand household objects out of the box.
+
+Chief executive Marisol Tan demonstrated the robot live, asking it to
+clear a small dining table and identify three unlabelled spice jars by
+smell. The crowd applauded when Helio correctly named cumin, paprika, and
+star anise. Tan said the unit will retail for $4,900 in the United States
+beginning in March, with a leasing option priced at $129 per month.
+
+Industry analysts greeted the announcement with cautious optimism. "The
+demos look good, but household robots have a long history of looking good
+on stage and struggling in real homes," said Priya Venkatesh of Forrester
+Research. Acme has not yet released independent reliability data.
+
+The company also announced a new partnership with a national elder-care
+provider that will deploy 200 Helio units to assisted-living facilities
+across Texas and Arizona over the next twelve months.
+""",
+
+    # ── TASKS mode (informational — reference doc, should classify informational)
+    "test_tasks_informational.pdf": """HTTP Status Codes — Reference
+
+Status codes in the HTTP protocol are three-digit numbers grouped into
+five classes by their first digit.
+
+1xx Informational
+  These indicate that the request was received and the process is
+  continuing. They are rarely seen in everyday application code. The most
+  common is 100 Continue, used during request body negotiation.
+
+2xx Success
+  The request was successfully received, understood, and accepted. 200 OK
+  is the canonical success response. 201 Created is used after a resource
+  has been created, typically returned by POST endpoints. 204 No Content
+  signals success but with no response body — common for DELETE endpoints.
+
+3xx Redirection
+  Further action is required to complete the request. 301 Moved
+  Permanently is cacheable and should update bookmarks and indexes; 302
+  Found is a temporary redirect; 304 Not Modified is returned when the
+  client's cached copy is still valid.
+
+4xx Client Error
+  The request contains bad syntax or cannot be fulfilled. 400 Bad Request
+  is the generic client-error response. 401 Unauthorized indicates missing
+  or invalid authentication; 403 Forbidden indicates valid credentials
+  without sufficient permissions. 404 Not Found is used when the resource
+  does not exist. 429 Too Many Requests is used for rate limiting.
+
+5xx Server Error
+  The server failed to fulfill an apparently valid request. 500 Internal
+  Server Error is generic; 502 Bad Gateway and 503 Service Unavailable
+  point to upstream or capacity issues; 504 Gateway Timeout indicates a
+  slow upstream service.
+
+Choosing the right status code matters for caching, retries, and client
+behaviour. Many client libraries automatically retry on 5xx but not 4xx,
+and CDNs cache 301 responses indefinitely by default.
+""",
+
+    # ── CHUNKING test (long multi-page document, exercises chunker + merge) ──
+    "test_long_document.pdf": (
+        "A Brief History of Programming Languages\n\n"
+        + (
+            "The first electronic computers in the 1940s were programmed by "
+            "physically rewiring patch panels. Within a decade, assembly "
+            "languages let programmers write mnemonics like ADD and JMP "
+            "instead of binary opcodes, and assemblers translated those "
+            "mnemonics into machine code. This was a productivity leap, but "
+            "every machine still had its own dialect.\n\n"
+            "FORTRAN, released by IBM in 1957, was the first widely adopted "
+            "high-level language. It introduced loops, conditionals, and "
+            "subroutines in a form recognisable today, and proved that "
+            "compiled high-level code could be nearly as fast as hand-written "
+            "assembly. COBOL followed in 1959, aimed at business data "
+            "processing, and remained the backbone of banking and government "
+            "systems for the next half century.\n\n"
+            "The 1970s introduced two languages whose influence still "
+            "dominates: C and Smalltalk. C, designed at Bell Labs, gave "
+            "programmers low-level control with a portable syntax — Unix was "
+            "rewritten in C, and almost every operating system kernel since "
+            "has followed that pattern. Smalltalk, designed at Xerox PARC, "
+            "introduced object-oriented programming as a complete philosophy: "
+            "everything is an object, communication happens by message "
+            "passing, and the development environment is itself a live "
+            "program you can edit.\n\n"
+            "The 1990s saw the rise of dynamic languages on the web. Perl, "
+            "Python, Ruby, and PHP each became dominant in particular "
+            "ecosystems. JavaScript, designed in ten days by Brendan Eich at "
+            "Netscape, would over the next twenty years become the only "
+            "language that runs natively in every web browser, and through "
+            "Node.js eventually on servers as well.\n\n"
+            "Java, also from the mid-1990s, took a different bet: a virtual "
+            "machine that could run the same bytecode on any platform. The "
+            "JVM became its own ecosystem, eventually hosting languages such "
+            "as Scala, Clojure, and Kotlin that share Java's runtime but "
+            "explore very different design philosophies.\n\n"
+            "The 2010s brought a new wave focused on safety and concurrency. "
+            "Rust offered memory safety without garbage collection by "
+            "tracking ownership in the type system. Go, from Google, took the "
+            "opposite approach — a small language with garbage collection and "
+            "first-class lightweight threads, deliberately easy to learn. "
+            "Swift replaced Objective-C as the language of Apple platforms, "
+            "and TypeScript brought static types to the JavaScript world.\n\n"
+            "Throughout this history, three forces have repeatedly reshaped "
+            "the field: hardware changes (multi-core, GPUs, and now "
+            "specialised AI accelerators), shifts in deployment (mainframes "
+            "to PCs to web to mobile to cloud), and changing expectations "
+            "around safety and developer ergonomics. Each new generation of "
+            "languages tends to absorb the lessons of the previous one while "
+            "rejecting some of its constraints.\n\n"
+        ) * 4
+    ),
+
     # ── COMPARE mode (doc B) ─────────────────────────────────────────────────
     "test_compare_b.pdf": """Proposal B — Managed Observability via Datadog
 
@@ -175,16 +295,43 @@ roughly linearly with growth.
 
 def write_pdf(path: str, body: str):
     doc = fitz.open()
-    page = doc.new_page()  # A4 by default
-    rect = fitz.Rect(54, 54, page.rect.width - 54, page.rect.height - 54)
-    # insert_textbox will wrap long lines and honour explicit newlines.
-    page.insert_textbox(
-        rect,
-        body,
-        fontsize=10.5,
-        fontname="helv",
-        align=0,
-    )
+    remaining = body
+    while remaining:
+        page = doc.new_page()  # A4 by default
+        rect = fitz.Rect(54, 54, page.rect.width - 54, page.rect.height - 54)
+        # insert_textbox returns the number of chars that did NOT fit (as a
+        # negative count when overflowed). When it overflows, we don't get the
+        # exact split point back, so we shrink-and-retry until it fits, then
+        # recurse on the leftover.
+        rc = page.insert_textbox(
+            rect, remaining, fontsize=10.5, fontname="helv", align=0,
+        )
+        if rc >= 0:
+            break
+        # Binary-search the largest prefix that fits on this page.
+        lo, hi = 0, len(remaining)
+        best_fit = 0
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            test_page = doc.new_page()
+            test_rect = fitz.Rect(54, 54, test_page.rect.width - 54, test_page.rect.height - 54)
+            r = test_page.insert_textbox(
+                test_rect, remaining[:mid], fontsize=10.5, fontname="helv", align=0,
+            )
+            doc.delete_page(len(doc) - 1)
+            if r >= 0:
+                best_fit = mid
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        # Replace the overflowed page with one that fits.
+        doc.delete_page(len(doc) - 1)
+        page = doc.new_page()
+        rect = fitz.Rect(54, 54, page.rect.width - 54, page.rect.height - 54)
+        page.insert_textbox(
+            rect, remaining[:best_fit], fontsize=10.5, fontname="helv", align=0,
+        )
+        remaining = remaining[best_fit:]
     doc.save(path)
     doc.close()
 

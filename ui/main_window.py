@@ -1,29 +1,52 @@
-from PyQt5.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QPushButton,
-    QTextEdit, QFileDialog, QComboBox, QLabel, QHBoxLayout,
-    QListWidget, QFrame, QSizePolicy, QProgressBar, QTabWidget,
-    QMessageBox, QLineEdit, QShortcut, QAbstractItemView,
-)
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
-from PyQt5.QtGui import QKeySequence
-import sys
 import os
+import sys
+
+from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtGui import QKeySequence, QTextOption
+from PyQt5.QtWidgets import (
+    QAbstractItemView,
+    QAction,
+    QApplication,
+    QComboBox,
+    QFileDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMenu,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QShortcut,
+    QSizePolicy,
+    QSplitter,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+from core.auto_scan import run_auto_scan
+from core.llm_router import set_provider
+from core.workflow_engine import run_workflow
+from exports.exporter import export_csv, export_txt
+from input_processing.cleaner import clean_text
 from input_processing.email_handler import get_latest_emails
 from input_processing.google_auth import (
-    list_accounts, add_account, set_active_account,
-    get_active_account, remove_account,
+    add_account,
+    get_active_account,
+    list_accounts,
+    remove_account,
+    set_active_account,
 )
-from input_processing.text_handler import read_text_file
 from input_processing.pdf_handler import read_pdf
-from input_processing.cleaner import clean_text
-from core.workflow_engine import run_workflow
-from core.llm_router import set_provider
-from exports.exporter import export_txt, export_csv
-from storage.history_manager import record, fetch, purge
+from input_processing.text_handler import read_text_file
 from services.calendar_service import push_tasks_to_calendar
+from storage.history_manager import fetch, purge, record
+from ui.samples import SAMPLES
 from ui.settings_dialog import SettingsDialog
 from ui.task_review_dialog import TaskReviewDialog
-
 
 STYLESHEET = """
 QWidget {
@@ -153,6 +176,10 @@ QSpinBox {
     background-color: #3a3a3c; border: 1px solid #48484a;
     border-radius: 6px; padding: 4px 8px; color: #e5e5ea;
 }
+QSplitter::handle { background-color: #2c2c2e; }
+QSplitter::handle:horizontal { width: 6px; margin: 4px 0; border-radius: 3px; }
+QSplitter::handle:vertical { height: 6px; margin: 0 4px; border-radius: 3px; }
+QSplitter::handle:hover { background-color: #0a84ff; }
 """
 
 
@@ -192,6 +219,7 @@ class Worker(QThread):
     finished = pyqtSignal(dict)
     error = pyqtSignal(str)
     cancelled = pyqtSignal()
+    progress = pyqtSignal(int, int)  # (current_chunk, total_chunks)
 
     def __init__(self, text, workflow):
         super().__init__()
@@ -208,7 +236,11 @@ class Worker(QThread):
             if self._cancel:
                 self.cancelled.emit()
                 return
-            result = run_workflow(cleaned, workflow=self.workflow)
+            result = run_workflow(
+                cleaned,
+                workflow=self.workflow,
+                progress_callback=self.progress.emit,
+            )
             if self._cancel:
                 self.cancelled.emit()
                 return
@@ -247,6 +279,42 @@ class CalendarWorker(QThread):
             self.error.emit(str(e))
 
 
+class AutoScanWorker(QThread):
+    finished = pyqtSignal(list)
+    error = pyqtSignal(str)
+    cancelled = pyqtSignal()
+    progress = pyqtSignal(int, int, str)  # (current, total, subject)
+
+    def __init__(self, window_hours: int, max_emails: int, account: str | None):
+        super().__init__()
+        self.window_hours = window_hours
+        self.max_emails = max_emails
+        self.account = account
+        self._cancel = False
+
+    def cancel(self):
+        self._cancel = True
+
+    def run(self):
+        try:
+            results = run_auto_scan(
+                window_hours=self.window_hours,
+                max_emails=self.max_emails,
+                account=self.account,
+                progress_callback=lambda c, t, s: self.progress.emit(c, t, s),
+                cancel_check=lambda: self._cancel,
+            )
+            if self._cancel:
+                self.cancelled.emit()
+            else:
+                self.finished.emit(results)
+        except Exception as e:
+            if self._cancel:
+                self.cancelled.emit()
+            else:
+                self.error.emit(str(e))
+
+
 def _section_label(text: str) -> QLabel:
     label = QLabel(text.upper())
     label.setObjectName("section_label")
@@ -269,8 +337,11 @@ class MainWindow(QWidget):
         self._history_data = []
         self._last_result = {}
         self._last_workflow = "summary"
+        self._mode = "manual"
+        self._auto_results: list[dict] = []
         self._build_ui()
         self._register_shortcuts()
+        self._apply_mode()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -293,6 +364,19 @@ class MainWindow(QWidget):
         title_col.addWidget(title)
         title_col.addWidget(subtitle)
         hl.addLayout(title_col)
+
+        hl.addSpacing(20)
+        hl.addWidget(QLabel("Mode:"))
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Manual", "Auto"])
+        self.mode_combo.setFixedWidth(110)
+        self.mode_combo.setToolTip(
+            "Manual: pick an input and a workflow.\n"
+            "Auto: scan recent emails and rank by importance."
+        )
+        self.mode_combo.currentTextChanged.connect(self._on_mode_change)
+        hl.addWidget(self.mode_combo)
+
         hl.addStretch()
 
         hl.addWidget(QLabel("Provider:"))
@@ -320,27 +404,36 @@ class MainWindow(QWidget):
         root.addWidget(_divider())
 
         # ── Body ──────────────────────────────────────────────────────────
-        body = QHBoxLayout()
-        body.setContentsMargins(16, 16, 16, 16)
-        body.setSpacing(12)
-        root.addLayout(body)
+        body_wrap = QHBoxLayout()
+        body_wrap.setContentsMargins(16, 16, 16, 16)
+        body_wrap.setSpacing(0)
+        root.addLayout(body_wrap)
 
-        body.addLayout(self._left_panel(), 3)
-        body.addWidget(self._right_tabs(), 2)
+        self.body_splitter = QSplitter(Qt.Horizontal)
+        self.body_splitter.setChildrenCollapsible(False)
+        left_widget = QWidget()
+        left_widget.setLayout(self._left_panel())
+        self.body_splitter.addWidget(left_widget)
+        self.body_splitter.addWidget(self._right_tabs())
+        self.body_splitter.setStretchFactor(0, 3)
+        self.body_splitter.setStretchFactor(1, 2)
+        self.body_splitter.setSizes([720, 480])
+        body_wrap.addWidget(self.body_splitter)
 
     def _left_panel(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.setSpacing(10)
 
-        layout.addWidget(_section_label("Input · drop files here"))
+        self._input_label = _section_label("Input · drop files here")
+        layout.addWidget(self._input_label)
         self.input_text = DropTextEdit()
         self.input_text.setPlaceholderText(
             "Paste text, drop .txt/.pdf files, upload files, or select an email…"
         )
-        self.input_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.input_text.setMaximumHeight(260)
+        self.input_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.input_text.setMinimumHeight(140)
         self.input_text.files_dropped.connect(self._load_paths)
-        layout.addWidget(self.input_text)
+        layout.addWidget(self.input_text, 1)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
@@ -348,15 +441,44 @@ class MainWindow(QWidget):
         self.file_button.clicked.connect(self.load_file)
         self.email_button = QPushButton("✉  Fetch Emails")
         self.email_button.clicked.connect(self.load_emails)
+        self.sample_button = QPushButton("📄  Sample ▾")
+        self.sample_button.setToolTip("Load a built-in demo document")
+        self.sample_button.clicked.connect(self._show_sample_menu)
         btn_row.addWidget(self.file_button)
         btn_row.addWidget(self.email_button)
+        btn_row.addWidget(self.sample_button)
         layout.addLayout(btn_row)
+        self._input_buttons = [self.file_button, self.email_button, self.sample_button]
 
-        layout.addWidget(_divider())
-        layout.addWidget(_section_label("Workflow"))
+        self._left_divider = _divider()
+        layout.addWidget(self._left_divider)
+        self._workflow_label = _section_label("Workflow")
+        layout.addWidget(self._workflow_label)
         self.workflow_selector = QComboBox()
         self.workflow_selector.addItems(["summary", "tasks", "insights", "compare"])
         layout.addWidget(self.workflow_selector)
+
+        # Auto-mode descriptor that replaces the manual-mode controls
+        self._auto_hint = QLabel(
+            "Auto mode scans your most recent emails, ranks them by\n"
+            "task urgency, and surfaces what needs your attention."
+        )
+        self._auto_hint.setObjectName("status_label")
+        self._auto_hint.setWordWrap(True)
+        self._auto_hint.setAlignment(Qt.AlignLeft)
+        layout.addWidget(self._auto_hint)
+
+        auto_window_row = QHBoxLayout()
+        auto_window_row.setSpacing(8)
+        self._auto_window_label = QLabel("Window:")
+        self._auto_window_label.setObjectName("section_label")
+        self.auto_window_combo = QComboBox()
+        self.auto_window_combo.addItems(["4 hours", "12 hours", "24 hours", "48 hours"])
+        self.auto_window_combo.setCurrentIndex(1)
+        auto_window_row.addWidget(self._auto_window_label)
+        auto_window_row.addWidget(self.auto_window_combo, 1)
+        self._auto_window_row_widgets = [self._auto_window_label, self.auto_window_combo]
+        layout.addLayout(auto_window_row)
 
         self.process_button = QPushButton("▶  Process   (Ctrl+Enter)")
         self.process_button.setObjectName("primary_button")
@@ -375,47 +497,60 @@ class MainWindow(QWidget):
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
 
-        layout.addStretch(1)
         return layout
 
     def _right_tabs(self) -> QTabWidget:
         tabs = QTabWidget()
+        self.tabs = tabs
 
         # ── Output tab ─────────────────────────────────────────────────────
         out_widget = QWidget()
         ol = QVBoxLayout(out_widget)
-        ol.setSpacing(10)
+        ol.setSpacing(0)
         ol.setContentsMargins(8, 8, 8, 8)
 
-        ol.addWidget(_section_label("Emails"))
+        # Emails pane (top of vertical splitter)
+        emails_pane = QWidget()
+        ep = QVBoxLayout(emails_pane)
+        ep.setSpacing(8)
+        ep.setContentsMargins(0, 0, 0, 0)
+        ep.addWidget(_section_label("Emails"))
         self.email_search = QLineEdit()
         self.email_search.setPlaceholderText(
             "Gmail search (e.g. from:boss@co is:unread subject:invoice) — Enter to search"
         )
         self.email_search.returnPressed.connect(self.load_emails)
-        ol.addWidget(self.email_search)
+        ep.addWidget(self.email_search)
 
         self.email_list = QListWidget()
-        self.email_list.setMinimumHeight(320)
+        self.email_list.setMinimumHeight(80)
         self.email_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.email_list.itemClicked.connect(self.show_email_preview)
-        ol.addWidget(self.email_list)
+        ep.addWidget(self.email_list, 1)
 
         use_email_row = QHBoxLayout()
         use_email_row.addStretch()
         self.use_emails_btn = QPushButton("⬆  Use selected in input")
         self.use_emails_btn.clicked.connect(self._load_selected_emails)
         use_email_row.addWidget(self.use_emails_btn)
-        ol.addLayout(use_email_row)
+        ep.addLayout(use_email_row)
 
-        ol.addWidget(_divider())
-
-        ol.addWidget(_section_label("Output"))
+        # Output pane (bottom of vertical splitter)
+        output_pane = QWidget()
+        op = QVBoxLayout(output_pane)
+        op.setSpacing(8)
+        op.setContentsMargins(0, 0, 0, 0)
+        op.addWidget(_section_label("Output"))
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
         self.output_text.setPlaceholderText("Results will appear here…")
         self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        ol.addWidget(self.output_text)
+        self.output_text.setMinimumHeight(80)
+        _justify = QTextOption()
+        _justify.setAlignment(Qt.AlignJustify)
+        _justify.setWrapMode(QTextOption.WordWrap)
+        self.output_text.document().setDefaultTextOption(_justify)
+        op.addWidget(self.output_text, 1)
 
         export_row = QHBoxLayout()
         export_row.setSpacing(8)
@@ -427,13 +562,22 @@ class MainWindow(QWidget):
         self.export_csv_btn.setEnabled(False)
         export_row.addWidget(self.export_txt_btn)
         export_row.addWidget(self.export_csv_btn)
-        ol.addLayout(export_row)
+        op.addLayout(export_row)
 
         self.calendar_btn = QPushButton("📅  Push Tasks to Google Calendar")
         self.calendar_btn.setObjectName("success_button")
         self.calendar_btn.clicked.connect(self._push_to_calendar)
         self.calendar_btn.setVisible(False)
-        ol.addWidget(self.calendar_btn)
+        op.addWidget(self.calendar_btn)
+
+        self.output_splitter = QSplitter(Qt.Vertical)
+        self.output_splitter.setChildrenCollapsible(False)
+        self.output_splitter.addWidget(emails_pane)
+        self.output_splitter.addWidget(output_pane)
+        self.output_splitter.setStretchFactor(0, 1)
+        self.output_splitter.setStretchFactor(1, 2)
+        self.output_splitter.setSizes([280, 420])
+        ol.addWidget(self.output_splitter)
 
         tabs.addTab(out_widget, "Output")
 
@@ -458,6 +602,35 @@ class MainWindow(QWidget):
         hl.addWidget(clear_btn, alignment=Qt.AlignRight)
 
         tabs.addTab(hist_widget, "History")
+
+        # ── Auto digest tab ───────────────────────────────────────────────
+        auto_widget = QWidget()
+        al = QVBoxLayout(auto_widget)
+        al.setSpacing(10)
+        al.setContentsMargins(8, 8, 8, 8)
+
+        al.addWidget(_section_label("Inbox triage"))
+        self.auto_summary_label = QLabel(
+            "Switch to Auto mode and click Scan to triage your recent inbox."
+        )
+        self.auto_summary_label.setObjectName("status_label")
+        self.auto_summary_label.setWordWrap(True)
+        al.addWidget(self.auto_summary_label)
+
+        self.auto_output = QTextEdit()
+        self.auto_output.setReadOnly(True)
+        self.auto_output.setPlaceholderText("Scan results will appear here…")
+        self.auto_output.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        al.addWidget(self.auto_output)
+
+        self.auto_push_btn = QPushButton("📅  Push all high/medium tasks to Calendar")
+        self.auto_push_btn.setObjectName("success_button")
+        self.auto_push_btn.clicked.connect(self._push_auto_tasks_to_calendar)
+        self.auto_push_btn.setVisible(False)
+        al.addWidget(self.auto_push_btn)
+
+        self._auto_tab_index = tabs.addTab(auto_widget, "Auto")
+
         tabs.currentChanged.connect(lambda i: self._refresh_history() if i == 1 else None)
 
         return tabs
@@ -480,6 +653,39 @@ class MainWindow(QWidget):
         dialog = SettingsDialog(self)
         if dialog.exec_():
             self.status_label.setText("Preferences saved.")
+
+    # ── Mode ───────────────────────────────────────────────────────────────
+
+    def _on_mode_change(self, label: str):
+        self._mode = "auto" if label.lower() == "auto" else "manual"
+        self._apply_mode()
+
+    def _apply_mode(self):
+        is_auto = self._mode == "auto"
+
+        # Manual-only controls
+        self._input_label.setVisible(not is_auto)
+        self.input_text.setVisible(not is_auto)
+        for btn in self._input_buttons:
+            btn.setVisible(not is_auto)
+        self._left_divider.setVisible(not is_auto)
+        self._workflow_label.setVisible(not is_auto)
+        self.workflow_selector.setVisible(not is_auto)
+
+        # Auto-only controls
+        self._auto_hint.setVisible(is_auto)
+        for w in self._auto_window_row_widgets:
+            w.setVisible(is_auto)
+
+        # Process button label and tab focus
+        if is_auto:
+            self.process_button.setText("🔍  Scan recent emails")
+            if hasattr(self, "tabs") and hasattr(self, "_auto_tab_index"):
+                self.tabs.setCurrentIndex(self._auto_tab_index)
+        else:
+            self.process_button.setText("▶  Process   (Ctrl+Enter)")
+            if hasattr(self, "tabs"):
+                self.tabs.setCurrentIndex(0)
 
     # ── Provider ───────────────────────────────────────────────────────────
 
@@ -604,6 +810,30 @@ class MainWindow(QWidget):
         names = ", ".join(os.path.basename(p) for p in paths)
         self.status_label.setText(f"Loaded: {names}")
 
+    # ── Sample documents ───────────────────────────────────────────────────
+
+    def _show_sample_menu(self):
+        menu = QMenu(self)
+        for name, info in SAMPLES.items():
+            action = QAction(name, self)
+            action.setToolTip(info.get("hint", ""))
+            action.triggered.connect(lambda _checked, n=name: self._load_sample(n))
+            menu.addAction(action)
+        # Anchor below the button
+        menu.exec_(self.sample_button.mapToGlobal(self.sample_button.rect().bottomLeft()))
+
+    def _load_sample(self, name: str):
+        sample = SAMPLES.get(name)
+        if not sample:
+            return
+        self.input_text.setText(sample["text"])
+        workflow = sample.get("workflow")
+        if workflow:
+            idx = self.workflow_selector.findText(workflow)
+            if idx >= 0:
+                self.workflow_selector.setCurrentIndex(idx)
+        self.status_label.setText(f"Loaded sample: {name}")
+
     # ── Email loading ──────────────────────────────────────────────────────
 
     SHOW_MORE_SENTINEL = "＋  Show more"
@@ -700,11 +930,21 @@ class MainWindow(QWidget):
     # ── Processing ─────────────────────────────────────────────────────────
 
     def process_input(self):
-        # If a run is active, this acts as Cancel.
+        # If a manual run is active, this acts as Cancel.
         if getattr(self, "worker", None) and self.worker.isRunning():
             self.worker.cancel()
             self.process_button.setText("Cancelling…")
             self.process_button.setEnabled(False)
+            return
+        # If an auto scan is active, this acts as Cancel.
+        if getattr(self, "auto_worker", None) and self.auto_worker.isRunning():
+            self.auto_worker.cancel()
+            self.process_button.setText("Cancelling…")
+            self.process_button.setEnabled(False)
+            return
+
+        if self._mode == "auto":
+            self.start_auto_scan()
             return
 
         text = self.input_text.toPlainText().strip()
@@ -716,6 +956,7 @@ class MainWindow(QWidget):
         self.export_txt_btn.setEnabled(False)
         self.export_csv_btn.setEnabled(False)
         self.calendar_btn.setVisible(False)
+        self.progress_bar.setRange(0, 0)  # indeterminate until first progress event
         self.progress_bar.setVisible(True)
         self.status_label.setText("Running workflow…")
         self.output_text.clear()
@@ -724,10 +965,26 @@ class MainWindow(QWidget):
         self.worker.finished.connect(lambda r: self._on_result(r, text))
         self.worker.error.connect(self._on_error)
         self.worker.cancelled.connect(self._on_cancelled)
+        self.worker.progress.connect(self._on_progress)
         self.worker.start()
 
-    def _on_cancelled(self):
+    def _on_progress(self, current: int, total: int):
+        # Switch the bar to determinate mode the first time we know the total.
+        if self.progress_bar.maximum() != total:
+            self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(current)
+        if current == 0:
+            self.status_label.setText(f"Processing {total} chunk{'s' if total != 1 else ''}…")
+        else:
+            self.status_label.setText(f"Processing chunk {current} / {total}…")
+
+    def _reset_progress(self):
         self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setValue(0)
+
+    def _on_cancelled(self):
+        self._reset_progress()
         self.output_text.setText("")
         self.status_label.setText("Cancelled.")
         self.process_button.setText("▶  Process   (Ctrl+Enter)")
@@ -735,7 +992,7 @@ class MainWindow(QWidget):
 
     def _on_result(self, result: dict, original_text: str):
         self._last_result = result
-        self.progress_bar.setVisible(False)
+        self._reset_progress()
 
         if "error" in result:
             self.output_text.setText(f"Error: {result['error']}")
@@ -752,22 +1009,63 @@ class MainWindow(QWidget):
         self.process_button.setText("▶  Process   (Ctrl+Enter)")
         self.process_button.setEnabled(True)
 
+    def _format_bullet(self, item) -> list:
+        """Render one bullet, gracefully handling both plain strings and the
+        structured dicts the LLM sometimes returns for compare-style outputs.
+        """
+        if isinstance(item, str):
+            return [f"  •  {item.strip()}"]
+        if isinstance(item, dict):
+            # Heuristic header: a "text"/"topic"/"title" field describing what's being compared.
+            header = (
+                item.get("text")
+                or item.get("topic")
+                or item.get("title")
+                or item.get("aspect")
+            )
+            # Side-by-side answers under arbitrary key naming.
+            a = item.get("option_a") or item.get("a") or item.get("doc_a") or item.get("document_a")
+            b = item.get("option_b") or item.get("b") or item.get("doc_b") or item.get("document_b")
+            if header and (a or b):
+                out = [f"  •  {str(header).strip()}"]
+                if a:
+                    out.append(f"        A: {str(a).strip()}")
+                if b:
+                    out.append(f"        B: {str(b).strip()}")
+                return out
+            # Generic dict — flatten scalar key/values, skip noise.
+            parts = [
+                f"{k}: {v}"
+                for k, v in item.items()
+                if isinstance(v, (str, int, float, bool)) and str(v).strip()
+            ]
+            if parts:
+                return [f"  •  {' · '.join(parts)}"]
+        return [f"  •  {item}"]
+
     def _format_result(self, result: dict) -> str:
         lines = []
-        if result.get("summary"):
-            lines += ["📝  SUMMARY", "─" * 40, result["summary"].strip(), ""]
+        summary = result.get("summary")
+        if isinstance(summary, list):
+            points = [p.strip() for p in summary if isinstance(p, str) and p.strip()]
+            if points:
+                lines += ["📝  SUMMARY", "─" * 40]
+                for p in points:
+                    lines += [f"  •  {p}", ""]
+        elif isinstance(summary, str) and summary.strip():
+            lines += ["📝  SUMMARY", "─" * 40, summary.strip(), ""]
         if result.get("common_themes"):
             lines += ["🔗  COMMON THEMES", "─" * 40]
-            lines += [f"  •  {t}" for t in result["common_themes"]]
-            lines.append("")
+            for t in result["common_themes"]:
+                lines += self._format_bullet(t) + [""]
         if result.get("differences"):
             lines += ["🔀  DIFFERENCES", "─" * 40]
-            lines += [f"  •  {d}" for d in result["differences"]]
-            lines.append("")
+            for d in result["differences"]:
+                lines += self._format_bullet(d) + [""]
         if result.get("key_insights"):
             lines += ["🧠  INSIGHTS", "─" * 40]
-            lines += [f"  •  {i}" for i in result["key_insights"]]
-            lines.append("")
+            for i in result["key_insights"]:
+                lines += self._format_bullet(i) + [""]
         if result.get("action_items"):
             lines += ["📋  TASKS", "─" * 40]
             for task in result["action_items"]:
@@ -787,11 +1085,199 @@ class MainWindow(QWidget):
         return "\n".join(lines)
 
     def _on_error(self, msg: str):
-        self.progress_bar.setVisible(False)
+        self._reset_progress()
         self.output_text.setText(f"Error: {msg}")
         self.status_label.setText("Processing failed.")
         self.process_button.setText("▶  Process   (Ctrl+Enter)")
         self.process_button.setEnabled(True)
+
+    # ── Auto scan ──────────────────────────────────────────────────────────
+
+    AUTO_MAX_EMAILS = 8
+
+    def _auto_window_hours(self) -> int:
+        text = self.auto_window_combo.currentText()
+        # "12 hours" → 12
+        try:
+            return int(text.split()[0])
+        except (ValueError, IndexError):
+            return 12
+
+    def start_auto_scan(self):
+        if not self._current_account():
+            self.status_label.setText("Sign in to an account first (top-right).")
+            self.auto_output.setPlainText(
+                "No Google account is connected.\n\n"
+                "Click the Account dropdown in the header to add one — Auto mode "
+                "needs Gmail access to scan your inbox."
+            )
+            return
+
+        hours = self._auto_window_hours()
+        self.auto_output.clear()
+        self.auto_push_btn.setVisible(False)
+        self._auto_results = []
+        self.auto_summary_label.setText(f"Fetching emails from the past {hours} hours…")
+        self.process_button.setText("■  Cancel")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.status_label.setText("Scanning…")
+        if hasattr(self, "tabs") and hasattr(self, "_auto_tab_index"):
+            self.tabs.setCurrentIndex(self._auto_tab_index)
+
+        self.auto_worker = AutoScanWorker(
+            window_hours=hours,
+            max_emails=self.AUTO_MAX_EMAILS,
+            account=self._current_account(),
+        )
+        self.auto_worker.progress.connect(self._on_auto_progress)
+        self.auto_worker.finished.connect(self._on_auto_finished)
+        self.auto_worker.error.connect(self._on_auto_error)
+        self.auto_worker.cancelled.connect(self._on_auto_cancelled)
+        self.auto_worker.start()
+
+    def _on_auto_progress(self, current: int, total: int, subject: str):
+        if total <= 0:
+            return
+        if self.progress_bar.maximum() != total:
+            self.progress_bar.setRange(0, total)
+        self.progress_bar.setValue(current)
+        if current == 0:
+            self.status_label.setText(f"Analysing {total} email{'s' if total != 1 else ''}…")
+        else:
+            short = (subject[:50] + "…") if len(subject) > 50 else subject
+            self.status_label.setText(f"Email {current} / {total} — {short}")
+
+    def _on_auto_finished(self, results: list):
+        self._auto_results = results
+        self._reset_progress()
+        self.process_button.setText("🔍  Scan recent emails")
+        self.process_button.setEnabled(True)
+        self._render_auto_results(results)
+        self.status_label.setText(f"Done. {len(results)} email(s) analysed.")
+
+    def _on_auto_error(self, msg: str):
+        self._reset_progress()
+        self.process_button.setText("🔍  Scan recent emails")
+        self.process_button.setEnabled(True)
+        self.auto_output.setPlainText(f"Scan failed: {msg}")
+        self.auto_summary_label.setText("Scan failed.")
+        self.status_label.setText("Scan failed.")
+
+    def _on_auto_cancelled(self):
+        self._reset_progress()
+        self.process_button.setText("🔍  Scan recent emails")
+        self.process_button.setEnabled(True)
+        self.auto_summary_label.setText("Scan cancelled.")
+        self.status_label.setText("Cancelled.")
+
+    _TIER_ICON = {"high": "🔴", "medium": "🟡", "low": "🟢", "none": "⚪"}
+    _TIER_LABEL = {"high": "HIGH", "medium": "MEDIUM", "low": "LOW", "none": "FYI"}
+
+    def _render_auto_results(self, results: list):
+        if not results:
+            self.auto_output.setPlainText(
+                "No emails found in the selected window.\n\n"
+                "Try widening the window, or check that the active account is correct."
+            )
+            self.auto_summary_label.setText("No emails in window.")
+            return
+
+        counts = {"high": 0, "medium": 0, "low": 0, "none": 0}
+        for r in results:
+            counts[r["tier"]] = counts.get(r["tier"], 0) + 1
+        self.auto_summary_label.setText(
+            f"{len(results)} email(s) · 🔴 {counts['high']} high · "
+            f"🟡 {counts['medium']} medium · 🟢 {counts['low']} low · ⚪ {counts['none']} FYI"
+        )
+
+        lines = []
+        for r in results:
+            email = r["email"]
+            tier = r["tier"]
+            score = r["score"]
+            subject = email.get("subject") or "(no subject)"
+            sender = email.get("sender") or ""
+            icon = self._TIER_ICON.get(tier, "⚪")
+            label = self._TIER_LABEL.get(tier, "FYI")
+            lines.append(f"{icon}  {label} (score {score}) — {subject}")
+            lines.append(f"     From: {sender}")
+            reason = (r["result"].get("reason") if isinstance(r["result"], dict) else "") or ""
+            if reason:
+                lines.append(f"     “{reason}”")
+            tasks = (r["result"].get("action_items") if isinstance(r["result"], dict) else []) or []
+            if not tasks:
+                if "error" in (r["result"] or {}):
+                    lines.append(f"     (analysis error: {r['result']['error']})")
+                elif not reason:
+                    lines.append("     (no tasks detected)")
+            else:
+                for t in tasks:
+                    prio = (t.get("priority") or "n/a").strip()
+                    deadline = (t.get("deadline") or "no deadline").strip()
+                    lines.append(f"     • {t.get('task','(unnamed task)')}  ({prio} · {deadline})")
+            lines.append("")
+        self.auto_output.setPlainText("\n".join(lines).rstrip())
+
+        # Offer to push every actionable task from high/medium tier emails
+        actionable = self._collect_auto_tasks(tiers=("high", "medium"))
+        self.auto_push_btn.setVisible(bool(actionable))
+        if actionable:
+            self.auto_push_btn.setText(
+                f"📅  Push {len(actionable)} high/medium task(s) to Calendar"
+            )
+
+    def _collect_auto_tasks(self, tiers=("high", "medium")) -> list:
+        out = []
+        for r in self._auto_results:
+            if r["tier"] not in tiers:
+                continue
+            tasks = (r["result"].get("action_items") if isinstance(r["result"], dict) else []) or []
+            out.extend(tasks)
+        return out
+
+    def _push_auto_tasks_to_calendar(self):
+        tasks = self._collect_auto_tasks(tiers=("high", "medium"))
+        if not tasks:
+            return
+        dialog = TaskReviewDialog(tasks, parent=self)
+        if not dialog.exec_():
+            return
+        approved = dialog.approved_tasks()
+        if not approved:
+            self.status_label.setText("No tasks selected.")
+            return
+        self.auto_push_btn.setEnabled(False)
+        self.auto_push_btn.setText(f"Creating {len(approved)} event(s)…")
+        self.progress_bar.setRange(0, 0)
+        self.progress_bar.setVisible(True)
+        self.cal_worker = CalendarWorker(approved, account=self._current_account())
+        self.cal_worker.finished.connect(self._on_auto_calendar_done)
+        self.cal_worker.error.connect(self._on_auto_calendar_error)
+        self.cal_worker.start()
+
+    def _on_auto_calendar_done(self, stats: dict):
+        self._reset_progress()
+        self.auto_push_btn.setEnabled(True)
+        actionable = self._collect_auto_tasks(tiers=("high", "medium"))
+        self.auto_push_btn.setText(
+            f"📅  Push {len(actionable)} high/medium task(s) to Calendar"
+        )
+        msg = f"Created {stats['created']} event(s)."
+        if stats.get("failed"):
+            msg += f" {stats['failed']} failed."
+        self.status_label.setText(msg)
+        QMessageBox.information(self, "Calendar", msg)
+
+    def _on_auto_calendar_error(self, msg: str):
+        self._reset_progress()
+        self.auto_push_btn.setEnabled(True)
+        actionable = self._collect_auto_tasks(tiers=("high", "medium"))
+        self.auto_push_btn.setText(
+            f"📅  Push {len(actionable)} high/medium task(s) to Calendar"
+        )
+        self.status_label.setText(f"Calendar error: {msg}")
+        QMessageBox.critical(self, "Calendar Error", msg)
 
     # ── Calendar ───────────────────────────────────────────────────────────
 

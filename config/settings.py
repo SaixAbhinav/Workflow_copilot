@@ -1,5 +1,6 @@
-import os
 import json
+import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -11,7 +12,7 @@ _PREFS_PATH = os.path.join(os.path.dirname(__file__), "user_prefs.json")
 def _load_prefs() -> dict:
     if os.path.exists(_PREFS_PATH):
         try:
-            with open(_PREFS_PATH, "r", encoding="utf-8") as f:
+            with open(_PREFS_PATH, encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}

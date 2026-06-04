@@ -1,8 +1,9 @@
 from core.workflow_engine import run_workflow
-from input_processing.text_handler import read_text_file
-from input_processing.pdf_handler import read_pdf
 from input_processing.cleaner import clean_text
+from input_processing.pdf_handler import read_pdf
+from input_processing.text_handler import read_text_file
 from ui.main_window import run_app
+
 
 def process_file(file_path: str):
     if file_path.endswith(".txt"):
