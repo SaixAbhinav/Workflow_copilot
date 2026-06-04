@@ -1,9 +1,52 @@
 # AI Workflow Copilot
 
-A local-first PyQt5 desktop app that turns documents and Gmail messages into
-summaries, action items, insights, or side-by-side comparisons — powered by a
-local Ollama model, with Google Calendar integration for pushing extracted
-tasks.
+> Turn documents and Gmail messages into summaries, action items, insights, or
+> side-by-side comparisons — using a **local** LLM, then push the resulting tasks
+> straight to Google Calendar.
+
+A local-first PyQt5 desktop app powered by a local [Ollama](https://ollama.com)
+model. Your documents and emails never leave your machine — the LLM runs locally.
+
+![Python](https://img.shields.io/badge/Python-3.10+-3776AB?logo=python&logoColor=white)
+![PyQt5](https://img.shields.io/badge/UI-PyQt5-41CD52?logo=qt&logoColor=white)
+![Ollama](https://img.shields.io/badge/LLM-Ollama%20(local)-000000)
+![License](https://img.shields.io/badge/License-MIT-blue)
+
+<!-- DEMO: record a ~30s clip of one full workflow, convert to GIF, save as docs/demo.gif -->
+![Demo](docs/demo.gif)
+
+---
+
+## What this project demonstrates
+
+A complete local-first AI pipeline built end to end:
+
+- **Local LLM orchestration** — chunk long inputs, prompt a local Ollama model per
+  workflow, parse the JSON it returns, and merge results across chunks.
+- **Responsive desktop UI** — PyQt5 with workflows running on a background `QThread`
+  so the interface never freezes (runs are cancellable mid-flight).
+- **Real OAuth integration** — multi-account Google sign-in (Gmail read + Calendar
+  write) with per-account token storage and refresh.
+- **Privacy by design** — documents and email bodies are processed by a model
+  running on the user's own machine; nothing is sent to a third-party API.
+
+> **Note — this is a local-first desktop app, so there is no hosted "try it" demo.**
+> It needs Ollama and a model running locally plus your own Google credentials. The
+> GIF above and the screenshots below show it in action.
+
+---
+
+## Screenshots
+
+<!-- Capture these while the app is running and save them under docs/screenshots/ -->
+
+| Main window | Task review |
+|---|---|
+| ![Main window](docs/screenshots/main.png) | ![Task review dialog](docs/screenshots/task-review.png) |
+
+| Run history | Settings |
+|---|---|
+| ![Run history](docs/screenshots/history.png) | ![Settings dialog](docs/screenshots/settings.png) |
 
 ---
 
@@ -28,30 +71,32 @@ tasks.
 
 ## Architecture
 
+```mermaid
+flowchart TD
+    subgraph Inputs
+        F[File · .txt / .pdf]
+        G[Gmail messages]
+        T[Pasted text]
+    end
+    F & G & T --> IP["input_processing/<br/>handlers · cleaner · chunker · google_auth"]
+    IP --> WE["core/workflow_engine.py<br/><i>orchestrator</i>"]
+    WE --> PM["core/prompt_manager.py<br/>per-workflow prompt templates"]
+    PM --> LR["core/llm_router.py"]
+    LR --> OS["services/ollama_service.py<br/>local Ollama model"]
+    OS --> OP["core/output_parser.py<br/>extracts JSON"]
+    OP --> MR["merge_results()<br/>aggregates across chunks"]
+    MR --> UI["ui/main_window.py<br/>display · review · export · history"]
+    UI -->|approved tasks| CAL["services/calendar_service.py<br/>Google Calendar events"]
+    UI --> DB[("storage/<br/>SQLite history")]
 ```
-Input (File / Gmail / Text)
-        │
-        ▼
- input_processing/  →  handlers · cleaner · chunker · google_auth
-        │
-        ▼
- core/workflow_engine.py    orchestrator
-        │
-        ▼
- core/prompt_manager.py     per-workflow prompt templates
-        │
-        ▼
- core/llm_router.py  →  services/ollama_service.py
-        │
-        ▼
- core/output_parser.py      extracts JSON
-        │
-        ▼
- merge_results()            aggregates across chunks
-        │
-        ▼
- ui/main_window.py          display · review · export · history
-```
+
+---
+
+## Tech stack
+
+**Python** · **PyQt5** (desktop UI) · **Ollama** + Mistral (local LLM) ·
+**Google Gmail & Calendar APIs** (OAuth2) · **PyMuPDF** (PDF parsing) ·
+**SQLite** (run history) · **pytest** + **ruff**
 
 ---
 
@@ -206,4 +251,4 @@ ai_workflow_copilot/
 
 ## License
 
-MIT — see `LICENSE` if included, otherwise feel free to use and adapt.
+MIT — see [`LICENSE`](LICENSE).
