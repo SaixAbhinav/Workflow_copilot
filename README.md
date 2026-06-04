@@ -63,6 +63,10 @@ A complete local-first AI pipeline built end to end:
 ## Features
 
 - **Four workflows** — Summary, Tasks, Insights, Compare
+- **Auto mode (inbox triage)** — one click scans your most recent emails,
+  triages each in parallel against the local LLM, and ranks them into
+  high / medium / low urgency tiers — then push the important tasks to
+  Calendar in bulk (see [Auto mode](#auto-mode) below)
 - **Multi-source input** — paste text, drag-and-drop `.txt` / `.pdf`, batch
   upload, or fetch Gmail messages with native search syntax
   (`from:`, `subject:`, `is:unread`, …)
@@ -79,26 +83,90 @@ A complete local-first AI pipeline built end to end:
 
 ---
 
+## Auto mode
+
+Manual mode answers *"analyse this one thing I gave you."* **Auto mode** answers
+the more useful question: *"what in my inbox actually needs me right now?"*
+
+Switch the **Mode** dropdown from *Manual* to *Auto*, pick a time window, and hit
+**Scan**. The app then:
+
+1. **Fetches** your most recent emails in the chosen window
+   (`4 / 12 / 24 / 48` hours, newest first, capped at 15).
+2. **Triages each email in parallel** — every message gets one lean, direct LLM
+   call (no chunker; bodies are truncated to the first ~150 words, where most of
+   the actionable signal lives). Calls run on a small thread pool so the inbox is
+   scanned concurrently rather than one-at-a-time.
+3. **Ranks** the results into **high / medium / low / none** tiers. The tier comes
+   from the model's own urgency rating, with a cheap deterministic score
+   (task priority + deadline urgency) as a tie-breaker for ordering within a tier.
+4. Presents a ranked **digest** — the emails most likely to need action float to
+   the top, each with its extracted tasks.
+
+From the digest you can **push all high/medium tasks to Calendar in one click**,
+so a noisy inbox becomes a short, prioritised to-do list without reading every
+message yourself.
+
+> Auto mode is deliberately separate from the manual workflow pipeline: it uses
+> its own compact triage prompt and tight LLM options (small context window,
+> capped output tokens) so scanning a dozen emails stays fast on a local model.
+
+---
+
 ## Architecture
+
+Two paths share one local-LLM core. **Manual mode** runs a single chosen
+workflow through the orchestrator; **Auto mode** fans recent emails out for
+parallel triage and ranking.
 
 ```mermaid
 flowchart TD
-    subgraph Inputs
-        F[File · .txt / .pdf]
-        G[Gmail messages]
-        T[Pasted text]
+    subgraph IN[" 📥 &nbsp;Inputs "]
+        direction LR
+        F["📄 &nbsp;File<br/><small>.txt · .pdf</small>"]
+        T["📝 &nbsp;Pasted text"]
+        G["📧 &nbsp;Gmail messages"]
     end
-    F & G & T --> IP["input_processing/<br/>handlers · cleaner · chunker · google_auth"]
-    IP --> WE["core/workflow_engine.py<br/><i>orchestrator</i>"]
-    WE --> PM["core/prompt_manager.py<br/>per-workflow prompt templates"]
-    PM --> LR["core/llm_router.py"]
-    LR --> OS["services/ollama_service.py<br/>local Ollama model"]
-    OS --> OP["core/output_parser.py<br/>extracts JSON"]
-    OP --> MR["merge_results()<br/>aggregates across chunks"]
-    MR --> UI["ui/main_window.py<br/>display · review · export · history"]
-    UI -->|approved tasks| CAL["services/calendar_service.py<br/>Google Calendar events"]
-    UI --> DB[("storage/<br/>SQLite history")]
+
+    F & T --> IP["input_processing/<br/><small>handlers · cleaner · chunker</small>"]
+    G --> GA["google_auth · email_handler<br/><small>OAuth2 · multi-account fetch</small>"]
+
+    IP --> WE["core/workflow_engine.py<br/><b>Manual mode</b><br/><small>one workflow at a time</small>"]
+    GA --> WE
+    GA --> AS["core/auto_scan.py<br/><b>Auto mode</b><br/><small>parallel inbox triage + ranking</small>"]
+
+    WE --> PM["core/prompt_manager.py<br/><small>per-workflow prompt templates</small>"]
+
+    subgraph LLM[" 🧠 &nbsp;Local LLM core "]
+        direction LR
+        LR["core/llm_router.py"] --> OS["services/ollama_service.py<br/><small>local Ollama model</small>"]
+    end
+
+    PM --> LR
+    AS -.->|own triage prompt| LR
+    OS --> OP["core/output_parser.py<br/><small>extract JSON · merge_results()</small>"]
+
+    OP --> UI["ui/main_window.py<br/><small>display · review · export · history</small>"]
+    AS ==>|ranked digest · tiers| UI
+
+    UI -->|approved tasks| CAL["services/calendar_service.py<br/>📅 &nbsp;Google Calendar events"]
+    UI --> DB[("storage/<br/><small>SQLite history</small>")]
+
+    classDef inputs fill:#e8f0fe,stroke:#4285f4,stroke-width:1px,color:#202124;
+    classDef manual fill:#fff4e5,stroke:#f59e0b,stroke-width:1px,color:#202124;
+    classDef auto fill:#fde7f0,stroke:#d6336c,stroke-width:1px,color:#202124;
+    classDef llm fill:#ede9fe,stroke:#7c3aed,stroke-width:1px,color:#202124;
+    classDef sink fill:#e6f4ea,stroke:#34a853,stroke-width:1px,color:#202124;
+
+    class F,T,G,IP,GA inputs;
+    class WE,PM manual;
+    class AS auto;
+    class LR,OS,OP llm;
+    class UI,CAL,DB sink;
 ```
+
+The **pink** node is Auto mode, the **amber** nodes are Manual mode, and both
+feed the shared **purple** local-LLM core before results land in the UI.
 
 ---
 
