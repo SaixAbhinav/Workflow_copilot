@@ -42,13 +42,21 @@ A complete local-first AI pipeline built end to end:
 
 <!-- Capture these while the app is running and save them under docs/screenshots/ -->
 
-| Main window | Task review |
-|---|---|
-| ![Main window](docs/screenshots/main.png) | ![Task review dialog](docs/screenshots/task-review.png) |
+**Main window**
 
-| Run history | Settings |
-|---|---|
-| ![Run history](docs/screenshots/history.png) | ![Settings dialog](docs/screenshots/settings.png) |
+![Main window](docs/screenshots/main.png)
+
+**Task review dialog**
+
+![Task review dialog](docs/screenshots/task-review.png)
+
+**Run history**
+
+![Run history](docs/screenshots/history.png)
+
+**Settings**
+
+![Settings dialog](docs/screenshots/settings.png)
 
 ---
 
