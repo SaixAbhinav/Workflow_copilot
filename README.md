@@ -12,11 +12,6 @@ model. Your documents and emails never leave your machine — the LLM runs local
 ![Ollama](https://img.shields.io/badge/LLM-Ollama%20(local)-000000)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 
-<!-- DEMO: record a ~30s clip of one full workflow, convert to GIF, save as
-     docs/demo.gif, then uncomment the line below.
-![Demo](docs/demo.gif)
--->
-
 ---
 
 ## What this project demonstrates
@@ -34,7 +29,7 @@ A complete local-first AI pipeline built end to end:
 
 > **Note — this is a local-first desktop app, so there is no hosted "try it" demo.**
 > It needs Ollama and a model running locally plus your own Google credentials. The
-> GIF above and the screenshots below show it in action.
+> screenshots below show it in action.
 
 ---
 
@@ -46,9 +41,13 @@ A complete local-first AI pipeline built end to end:
 
 ![Main window](docs/screenshots/main.png)
 
-**Task review dialog**
+**Tasks result — ready to push to Calendar**
 
-![Task review dialog](docs/screenshots/task-review.png)
+![Tasks result ready to push to Calendar](docs/screenshots/task-review.png)
+
+**Task review — edit titles, deadlines, and priorities before anything hits your calendar**
+
+![Task review dialog](docs/screenshots/task-review-dialog.png)
 
 **Run history**
 
